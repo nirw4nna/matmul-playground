@@ -1,0 +1,6 @@
+matplotlib
+PyQt5 # Required in order to make interactive plots
+jinja2
+tabulate
+numpy
+psutil
