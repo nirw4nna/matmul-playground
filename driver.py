@@ -22,7 +22,7 @@ import argparse
 import psutil
 
 
-# This are the g++ flags I usually use, to my knowledge these should enable the highest level of optimizations.
+# These are the flags I usually use, to my knowledge they should enable the highest possible optimisations.
 # At some point I think it would be good if these were not hard-coded but user-defined (e.g. using environment variables).
 CXX = 'g++'
 OPTIM_FLAGS = '-march=native -mtune=native -Ofast -ffp-contract=fast -funroll-loops -flto=auto -fuse-linker-plugin'
@@ -151,8 +151,8 @@ def benchmark(plot: str, n_repeat: int, target_kernel: str,
 
         # Compute C_expected  
         c_expected = np.zeros((m, n)).astype(np.float32)
-        ground_truth_gemm = getattr(globals()[REFERENCE_KERNEL], REFERENCE_KERNEL)
-        ground_truth_gemm(m, n, k, a, lda, b, ldb, c_expected, ldc)
+        ref_gemm = getattr(globals()[REFERENCE_KERNEL], REFERENCE_KERNEL)
+        ref_gemm(m, n, k, a, lda, b, ldb, c_expected, ldc)
         
         for kernel in base_names:
             gemm = getattr(globals()[kernel], kernel)
