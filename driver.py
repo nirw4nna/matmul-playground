@@ -138,12 +138,8 @@ def benchmark(plot: str, n_repeat: int, target_kernel: str,
 
 
     def _run_benchmark(m: int, n: int, k: int):
-        # Leading dimension of A
-        lda = m
-        # Leading dimension of B
-        ldb = k
-        # Leading dimension of C
-        ldc = m
+        lda = m; ldb = k; ldc = m
+
         a = random_ndarray(m, k)
         b = random_ndarray(k, n)
         
@@ -215,7 +211,7 @@ def benchmark(plot: str, n_repeat: int, target_kernel: str,
             multi += 1
             plt.bar_label(rects, padding=3, fmt='%.1f')
         
-        plt.xticks(x + (width * 0.5), labels)
+        plt.xticks(x + (width * (multi - 1)) * 0.5, labels)
 
     elif plot == 'line':
         for kernel in kernel_sizes:
