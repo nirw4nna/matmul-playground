@@ -5,3 +5,6 @@ __pycache__/
 *.so
 *.o
 _gemm*.py
+
+# Perf
+*.data

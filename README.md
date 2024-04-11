@@ -39,6 +39,13 @@ chmod +x driver.py
 ```
 ./driver.py
 ```
+It's also possible to use this tool for **finetuning** the parameters that control the cache blocking (`MC`, `NC` and `KC`). To do so you can specify the option `--finetune=[MC | NC | KC]`, the script will compute some defaults based on the hardware you are currently on and then with the `--finetuning-range=start,stop,step` option you can test different values, using the so-called 'analytical' parameters as a baseline.
+
+### Notes for non-Linux users
+If you are running on a different operating system remember to update the `_CacheParams` values inside `cache.py`. This is because currently I'm using `sysconf` to fetch all the information I need and I don't know a cross-platform way of doing this.
+
+If you don't know how to fetch this information you can start from the default values provided in `platform.h` and use the finetuning mechanism to do search.
+
 
 ### Notes on benchmarking
 The numbers you will get from this tool are not ment to be 100% accurate but they are a good approximation. This means that one should not fixate on the numbers per-se but rather on closing the gap with MKL.

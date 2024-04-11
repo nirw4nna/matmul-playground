@@ -12,7 +12,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 # Set CPU affinity
 os.sched_setaffinity(0, {0})
 
-from typing import Set
+from typing import Set, Tuple
 from jinja2 import Environment, FileSystemLoader
 from importlib import import_module
 import numpy as np
@@ -20,6 +20,7 @@ from tabulate import tabulate
 import matplotlib.pyplot as plt
 import argparse
 import psutil
+from cache import compute_auto
 
 
 # These are the flags I usually use, to my knowledge they should enable the highest possible optimisations.
@@ -44,7 +45,7 @@ def random_ndarray(n_rows: int, n_cols: int) -> np.ndarray:
     return (RNG.random((n_rows, n_cols), dtype=np.float32) + 100).astype(np.float32)
 
 
-def compile_and_load(kernel: str = '') -> Set[str]:
+def compile_and_load(kernel: str, param: str, param_start: int, param_stop: int, param_step: int) -> Set[str]:
     """
     Compile the provided kernel, generate the ctypes binding and load the generated module.
     
@@ -54,12 +55,18 @@ def compile_and_load(kernel: str = '') -> Set[str]:
         - Be implemented in a `.cpp` file with the same name as the `.h` file (except for the extension, of course)
     
     Note: all kernels must have the same signature, this can be found for example in `kernels/gemm_jpi.h`.
-
     
     Parameters
     ----------
     kernel : `str`
         The kernel to be loaded or `''`, if no kernel is specified load everything from `kernels/`
+    
+    param : `str`
+        Extra argument that has to be passed to the compiler
+
+    param_start, param_stop, param_step : `int`
+        Range of values that `param` takes. A new module is generated
+        for each value of `param` and is identified by `{name}_{param}={value}`.
 
     Returns
     -------
@@ -84,59 +91,88 @@ def compile_and_load(kernel: str = '') -> Set[str]:
         else:
             raise RuntimeError(f'{kernel} not found')
 
-    print(f'Compiling {base_names}:\n')
-    # Compile a shared object .so for each file .c with the same base name
-    for obj in base_names:
-        shared_obj = f'{obj}.so'
-        binding = f'_{obj}.py'
-        if os.path.exists(shared_obj):
-            print(f'rm {shared_obj}')
-            os.remove(shared_obj)
-        
-        if os.path.exists(binding):
-            print(f'rm {binding}')
-            os.remove(binding)
-
-        cmd = f'{CXX} {CXXFLAGS} -fPIC -shared kernels/{obj}.cpp -o {shared_obj} {LDFLAGS}'
-        print(cmd)
-        if not os.system(cmd) == 0:
-            raise RuntimeError(f'Error compiling {shared_obj}')
-
 
     # Load the jinja template
     env = Environment(loader=FileSystemLoader('./'))
     bindings_template = env.get_template('_bindings.pytemplate')
     
-    for kernel in base_names:
-        # Each template requires two things:
-        #   - {{ shared_obj }} the name of the .so file (with the extension)
-        #   - {{ kernel }} the name of the actual kernel to call
-        data = {
-            'shared_obj': f'{kernel}.so',
-            'kernel': kernel
-        }
-        generated_code = bindings_template.render(data)
-        module = f'_{kernel}'
-        with open(f'{module}.py', 'wt') as f:
-            f.write(generated_code)
-        
-        # Flush everything to disk
-        os.sync()
+    def _compile_and_load(objs: Set[str], compiler_arg: str = ''):
+        has_arg = len(compiler_arg) > 0
+        extra_flag = f'-D{compiler_arg}' if has_arg else ''
+        identifier = f'_{compiler_arg.replace("=", "_")}' if has_arg else ''
 
-        # Try to load the generated module
-        globals()[kernel] = import_module(module)
+        # Compile a shared object .so for each file .c with the same base name
+        for obj in objs:
+            shared_obj = f'{obj}{identifier}.so'
+            module = f'_{obj}{identifier}'
+            py_module = f'{module}.py'
+
+            if os.path.exists(shared_obj):
+                print(f'rm {shared_obj}')
+                os.remove(shared_obj)
+            
+            if os.path.exists(py_module):
+                print(f'rm {py_module}')
+                os.remove(py_module)
+
+            cmd = f'{CXX} {CXXFLAGS} {extra_flag} -fPIC -shared kernels/{obj}.cpp -o {shared_obj} {LDFLAGS}'
+            print(cmd)
+            if not os.system(cmd) == 0:
+                raise RuntimeError(f'Error compiling {shared_obj}')
+            
+            # Make sure the output of the compiler is flushed to disk
+            os.sync()
+
+            data = {
+                'shared_obj': shared_obj,
+                'kernel': obj
+            }
+
+            generated_code = bindings_template.render(data)
+            with open(py_module, 'wt') as f:
+                f.write(generated_code)
+            
+            # Flush everything to disk
+            os.sync()
+
+            # Try to load the generated module
+            globals()[f'{obj}{identifier}'] = import_module(module)
+
+            
+    print(f'Compiling {base_names}:\n')
+
+    if not param == 'None':
+        # Compile and load the reference kernel only once
+        objs = {obj for obj in base_names if obj != REFERENCE_KERNEL}
+        for v in range(param_start, param_stop, param_step):
+            _compile_and_load(objs, f'{param}={v}')
+        _compile_and_load({REFERENCE_KERNEL})
+    else:
+        _compile_and_load(base_names)
 
     return base_names
 
 
 def benchmark(plot: str, n_repeat: int, target_kernel: str,
-              start: int, stop: int, step: int):
-    base_names = compile_and_load(target_kernel)
+              size_start: int, size_stop: int, size_step: int,
+              finetune_param: str,
+              finetuning_start: int, finetuning_stop: int, finetuning_step: int):
+    finetuning = not finetune_param == 'None'
+
+    if finetuning:
+        analytical_values = compute_auto(dtype_size=4, mr=8, nr=12, unroll=4)
+        print(f'Analytical values: {analytical_values}')
+        val = analytical_values[finetune_param]
+        finetuning_start += val
+        finetuning_stop += val
+        
+    base_names = compile_and_load(target_kernel, finetune_param,
+                                  finetuning_start, finetuning_stop, finetuning_step)
 
     kernel_sizes = {}
     kernel_gflops = {}
 
-
+    
     def _run_benchmark(m: int, n: int, k: int):
         lda = m; ldb = k; ldc = m
 
@@ -150,14 +186,15 @@ def benchmark(plot: str, n_repeat: int, target_kernel: str,
         ref_gemm = getattr(globals()[REFERENCE_KERNEL], REFERENCE_KERNEL)
         ref_gemm(m, n, k, a, lda, b, ldb, c_expected, ldc)
         
-        for kernel in base_names:
-            gemm = getattr(globals()[kernel], kernel)
-            
+        def _benchmark_kernel(module: str, kernel: str):
+            gemm = getattr(globals()[module], kernel)
+                
             # Take the best latency out of n_repeat samples
             latency = float('+inf')
 
             for _ in range(n_repeat):
                 c = np.zeros((m, n)).astype(np.float32)
+
                 cur_latency = gemm(m, n, k, a, lda, b, ldb, c, ldc)
 
                 latency = latency if cur_latency >= latency else cur_latency
@@ -165,19 +202,32 @@ def benchmark(plot: str, n_repeat: int, target_kernel: str,
                 if not np.allclose(c_expected, c, rtol=1.e-5, atol=1.e-5, equal_nan=True):
                     raise RuntimeError(f'"{kernel}" evaluation failed! M={m}, N={n}, K={k}')
 
-            if kernel not in kernel_sizes:
-                kernel_sizes[kernel] = []
+            if module not in kernel_sizes:
+                kernel_sizes[module] = []
 
-            kernel_sizes[kernel].append(k)
+            kernel_sizes[module].append(k)
+            
+            if module not in kernel_gflops:
+                kernel_gflops[module] = []
+            
+            kernel_gflops[module].append(flops / (1e9 * latency))
 
-            if kernel not in kernel_gflops:
-                kernel_gflops[kernel] = []
 
-            kernel_gflops[kernel].append(flops / (1e9 * latency))
+        for kernel in base_names:
+            if finetuning:
+                for v in range(finetuning_start, finetuning_stop, finetuning_step):
+                    # Benchmark the reference kernel only once
+                    if kernel == REFERENCE_KERNEL:
+                        _benchmark_kernel(REFERENCE_KERNEL, REFERENCE_KERNEL)
+                        break
+
+                    _benchmark_kernel(f'{kernel}_{finetune_param}_{v}', kernel)
+            else:
+                _benchmark_kernel(kernel, kernel)
     
 
-    print(f'\nBenchmarking kernels {base_names} REPEAT={n_repeat} m=n=k=[{start}:{stop}:{step}]. This can take some time...\n')
-    for k in range(start, stop, step):
+    print(f'\nBenchmarking kernels {base_names} REPEAT={n_repeat} m=n=k=[{size_start}:{size_stop}:{size_step}]. This can take some time...\n')
+    for k in range(size_start, size_stop, size_step):
         m = k
         n = k
         _run_benchmark(m, n, k)
@@ -235,7 +285,12 @@ if __name__ == '__main__':
     cli_parser.add_argument('--kernel', type=str, default='',
                             help='kernel to benchmark, if empty benchmark all of them')
     cli_parser.add_argument('--range', type=str, default='2048,2049,1',
-                            help='size of the matrices (m=n=k) to be tested in the form "start,stop,range"')
+                            help='size of the matrices (m=n=k) to be tested in the form "start,stop,step"')
+    cli_parser.add_argument('--finetune', choices=['KC', 'MC', 'NC', 'None'], default='None',
+                            help='fine-tune the selected parameter')
+    cli_parser.add_argument('--finetuning-range', type=str, default='-50,50,10',
+                            help='range of values to test for the selected parameter (the baseline is computed analytically) in the form "start,stop,step"')
+    
     args = cli_parser.parse_args()
     
     if args.clean:
@@ -248,10 +303,18 @@ if __name__ == '__main__':
                 os.remove(f)
         sys.exit()
 
-    range_params = args.range.split(',')
-    start, stop, step = (int(param, base=10) for param in range_params)
+    def _parse_range(range: str) -> Tuple[int, int, int]:
+        range_params = range.split(',')
+        return (int(param, base=10) for param in range_params)
+
+    start, stop, step = _parse_range(args.range)
     assert start >= 0 and stop >= 0 and step >= 1
 
+    finetune_start, finetune_stop, finetune_step = _parse_range(args.finetuning_range)
+    assert finetune_start < finetune_stop and finetune_step >= 1
+
     benchmark(args.plot, args.repeat, args.kernel,
-              start, stop, step)
+              start, stop, step,
+              args.finetune,
+              finetune_start, finetune_stop, finetune_step)
 
