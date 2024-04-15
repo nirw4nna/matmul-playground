@@ -18,10 +18,15 @@
 #   define f32x8 __m256
 #endif
 
+#if defined(_OPENMP)
+#   include <omp.h>
+#endif
+
 #define INLINE      inline __attribute__((always_inline))
 #define NOINLINE    __attribute__((__noinline__))
 
 #define MIN(x, y)  ((x) < (y) ? (x) : (y))
+#define MAX(x, y)  ((x) > (y) ? (x) : (y))
 
 // These are the parameters that control the cache blocking. They have to be computed based on the HW
 // on which the kernel is supposed to work. It's also possible to provide sane defaults
@@ -38,8 +43,10 @@
 #   define KC   384
 #endif
 
-
-#define axpy_8x12(A, B, idx)                                    \
+// Another thing I can try is to have more registers for alpha (like 2 or 3)
+// so the kernel ends up being like 16x12. I can also reduce the number of gamma registers
+// this may help with spilling
+#define rank1_8x12(A, B, idx)                                   \
     do {                                                        \
         const f32x8 alpha_p = _mm256_loadu_ps(&A[(idx) * 8]);   \
 \
@@ -157,7 +164,6 @@ extern "C" {
             pack_A_MRxKC(k, ib, mr, &a[i * lda], lda, a_tilde);
             a_tilde += k * mr;
         }
-
     }
 
 #if defined(__cplusplus)

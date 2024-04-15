@@ -3,16 +3,29 @@
 import os
 import sys
 
+NUM_THREADS = os.getenv('NUM_THREADS', '1')
+IS_PARALLEL = int(NUM_THREADS) > 1
+
 MKLROOT = os.getenv('MKLROOT', '/opt/intel/oneapi/mkl/2024.1')
 os.environ['MKLROOT'] = MKLROOT
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['GOTO_NUM_THREADS'] = '1'
-os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = NUM_THREADS
+os.environ['GOTO_NUM_THREADS'] = NUM_THREADS
+os.environ['MKL_NUM_THREADS'] = NUM_THREADS
 
-# Set CPU affinity
-os.sched_setaffinity(0, {0})
+if IS_PARALLEL:
+    # Set OMP policy to not move threads around
+    # Note: this appears to harm performance for some reason (probably due MKL/OpenMP interactions).
+    #       Try these without MKL at some point.
+    
+    # os.environ['OMP_PROC_BIND'] = 'close'
+    # os.environ['OMP_PROC_BIND'] = 'true'
+    # os.environ['OMP_PLACES'] = 'cores'
+    pass
+else:
+    # Set CPU affinity
+    os.sched_setaffinity(0, {0})
 
-from typing import Set, Tuple
+from typing import Set, Tuple, List
 from jinja2 import Environment, FileSystemLoader
 from importlib import import_module
 import numpy as np
@@ -28,9 +41,13 @@ from cache import compute_auto
 CXX = 'g++'
 OPTIM_FLAGS = '-march=native -mtune=native -Ofast -ffp-contract=fast -funroll-loops -flto=auto -fuse-linker-plugin'
 MKL_FLAGS = f'-DMKL_ILP64 -I{MKLROOT}/include'
+
 CXXFLAGS = f'-std=c++17 {MKL_FLAGS} -Wall -Wextra -Wshadow -Wformat -Wnoexcept -Wcast-qual -Wunused -Wdouble-promotion \
--Wlogical-op -Wcast-align -fno-exceptions -fno-rtti {OPTIM_FLAGS}'
-MKL_LDFLAGS = f'-Wl,--start-group {MKLROOT}/lib/libmkl_intel_ilp64.a {MKLROOT}/lib/libmkl_sequential.a {MKLROOT}/lib/libmkl_core.a -Wl,--end-group'
+-Wlogical-op -Wcast-align -fno-exceptions -fno-rtti {"-fopenmp " if IS_PARALLEL else ""}{OPTIM_FLAGS}'
+
+MKL_LDFLAGS = f'-Wl,--start-group {MKLROOT}/lib/libmkl_intel_ilp64.a {MKLROOT}/lib/{"libmkl_sequential.a" if not IS_PARALLEL else "libmkl_gnu_thread.a"} \
+{MKLROOT}/lib/libmkl_core.a -Wl,--end-group'
+
 LDFLAGS = f'{MKL_LDFLAGS} -lm'
 
 TURBO_CLOCK = psutil.cpu_freq().max / 1000 # GHz
@@ -45,7 +62,7 @@ def random_ndarray(n_rows: int, n_cols: int) -> np.ndarray:
     return (RNG.random((n_rows, n_cols), dtype=np.float32) + 100).astype(np.float32)
 
 
-def compile_and_load(kernel: str, param: str, param_start: int, param_stop: int, param_step: int) -> Set[str]:
+def compile_and_load(kernels: List[str], param: str, param_start: int, param_stop: int, param_step: int) -> Set[str]:
     """
     Compile the provided kernel, generate the ctypes binding and load the generated module.
     
@@ -85,12 +102,15 @@ def compile_and_load(kernel: str, param: str, param_start: int, param_stop: int,
     if REFERENCE_KERNEL not in base_names:
         raise RuntimeError(f'Reference kernel {REFERENCE_KERNEL} not found')
     
-    if len(kernel) > 0:
-        if kernel in base_names:
-            base_names = {kernel, REFERENCE_KERNEL}
-        else:
-            raise RuntimeError(f'{kernel} not found')
+    if len(kernels) > 0:
+        found_kernels = {REFERENCE_KERNEL}
+        for kernel in kernels:
+            if kernel in base_names:
+                found_kernels.add(kernel)
+            else:
+                raise RuntimeError(f'{kernel} not found')
 
+        base_names = found_kernels
 
     # Load the jinja template
     env = Environment(loader=FileSystemLoader('./'))
@@ -153,7 +173,7 @@ def compile_and_load(kernel: str, param: str, param_start: int, param_stop: int,
     return base_names
 
 
-def benchmark(plot: str, n_repeat: int, target_kernel: str,
+def benchmark(plot: str, n_repeat: int, kernels: List[str],
               size_start: int, size_stop: int, size_step: int,
               finetune_param: str,
               finetuning_start: int, finetuning_stop: int, finetuning_step: int):
@@ -166,7 +186,7 @@ def benchmark(plot: str, n_repeat: int, target_kernel: str,
         finetuning_start += val
         finetuning_stop += val
         
-    base_names = compile_and_load(target_kernel, finetune_param,
+    base_names = compile_and_load(kernels, finetune_param,
                                   finetuning_start, finetuning_stop, finetuning_step)
 
     kernel_sizes = {}
@@ -246,10 +266,14 @@ def benchmark(plot: str, n_repeat: int, target_kernel: str,
     if plot == 'none':
         return
     
-    plt.axhline(y=(TURBO_CLOCK * FLOPS_CYCLE), color='r', linestyle='--')
+    if not IS_PARALLEL:
+        # Plot the theoretical upper-bound only in single-threaded mode otherwise it's too unrealistic
+        plt.axhline(y=(TURBO_CLOCK * FLOPS_CYCLE), color='r', linestyle='--')
+
+    # TODO: if parallel plot also Gflops / thread
     plt.xlabel('m = n = k')
     plt.ylabel('GFLOPS')
-    plt.title('Performance (single-threaded)')
+    plt.title(f'Performance ({"single-threaded" if not IS_PARALLEL else f"NUM_THREADS={NUM_THREADS}"})')
 
     if plot == 'bar':
         width = 0.25
@@ -282,8 +306,8 @@ if __name__ == '__main__':
                             help='plot to display at the end')
     cli_parser.add_argument('--clean', action='store_true',
                             help='remove all the intermediate objects')
-    cli_parser.add_argument('--kernel', type=str, default='',
-                            help='kernel to benchmark, if empty benchmark all of them')
+    cli_parser.add_argument('--kernels', type=str, default='',
+                            help='comma-separated list of kernels to benchmark, if empty benchmark all of them')
     cli_parser.add_argument('--range', type=str, default='2048,2049,1',
                             help='size of the matrices (m=n=k) to be tested in the form "start,stop,step"')
     cli_parser.add_argument('--finetune', choices=['KC', 'MC', 'NC', 'None'], default='None',
@@ -313,7 +337,9 @@ if __name__ == '__main__':
     finetune_start, finetune_stop, finetune_step = _parse_range(args.finetuning_range)
     assert finetune_start < finetune_stop and finetune_step >= 1
 
-    benchmark(args.plot, args.repeat, args.kernel,
+    kernels = [kernel for kernel in args.kernels.split(',') if not kernel == '']
+    
+    benchmark(args.plot, args.repeat, kernels,
               start, stop, step,
               args.finetune,
               finetune_start, finetune_stop, finetune_step)
