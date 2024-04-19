@@ -19,7 +19,7 @@ static INLINE void ukernel_8x12(const u32 k,
 
     f32x8 beta_pj;
     for (u32 p = 0; p < k; ++p) {
-        axpy_8x12(a, b, p);
+        rank1_8x12(a, b, p);
     }
 
     _mm256_storeu_ps(&c[0 * ldc], gamma_0);

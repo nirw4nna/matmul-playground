@@ -300,7 +300,7 @@ def benchmark(plot: str, n_repeat: int, kernels: List[str],
 
 if __name__ == '__main__':
     cli_parser = argparse.ArgumentParser(description='Run your favourite GEMM kernels against the current state of the art, how close can you get?')
-    cli_parser.add_argument('--repeat', type=int, default=2,
+    cli_parser.add_argument('--repeat', type=int, default=5,
                             help='how many times a kernels should be executed for each set of M, N, K parameters')
     cli_parser.add_argument('--plot', choices=['bar', 'line', 'off'], default='bar',
                             help='plot to display at the end')
