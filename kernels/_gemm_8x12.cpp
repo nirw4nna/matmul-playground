@@ -4,7 +4,7 @@
 // This code is licensed under the terms of the MIT license
 // (https://opensource.org/license/mit).
 
-#include "gemm_8x12_unroll4.h"
+#include "gemm_8x12.h"
 
 static INLINE void ukernel_8x12(const u32 k,
                                 const f32 *__restrict a,
@@ -24,19 +24,10 @@ static INLINE void ukernel_8x12(const u32 k,
     f32x8 gamma_11 = _mm256_loadu_ps(&c[11 * ldc]);
 
     f32x8 beta_pj;
-
-    const u32 pb = (k / 4) * 4;
-    for (u32 p = 0; p < pb; p += 4) {
-        rank1_8x12(a, b, p + 0);
-        rank1_8x12(a, b, p + 1);
-        rank1_8x12(a, b, p + 2);
-        rank1_8x12(a, b, p + 3);
-    }
-
-    for (u32 p = pb; p < k; ++p) {
+    for (u32 p = 0; p < k; ++p) {
         rank1_8x12(a, b, p);
     }
-    
+
     _mm256_storeu_ps(&c[0 * ldc], gamma_0);
     _mm256_storeu_ps(&c[1 * ldc], gamma_1);
     _mm256_storeu_ps(&c[2 * ldc], gamma_2);
@@ -58,22 +49,8 @@ static INLINE void inner_loop(const u32 m, const u32 n, const u32 k,
     alignas(32) f32 c_tilde[8 * 12];
 
     for (u32 j = 0; j < n; j += 12) {
-        _mm_prefetch(&b[j * k], _MM_HINT_T0);
         const u32 jb = MIN(n - j, 12);
         for (u32 i = 0; i < m; i += 8) {
-            _mm_prefetch(&c[(j + 0) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 1) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 2) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 3) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 4) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 5) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 6) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 7) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 8) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 9) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 10) * ldc + i], _MM_HINT_T0);
-            _mm_prefetch(&c[(j + 11) * ldc + i], _MM_HINT_T0);
-
             const u32 ib = MIN(m - i, 8);
             if (ib == 8 && jb == 12) {
                 ukernel_8x12(k, &a[i * k], &b[j * k], &c[j * ldc + i], ldc);
@@ -111,10 +88,11 @@ static INLINE void kernel(const u32 m, const u32 n, const u32 k,
     }
 }
 
-f64 gemm_8x12_unroll4(const u32 m, const u32 n, const u32 k,
-                      const f32 *__restrict a, const u32 lda,
-                      const f32 *__restrict b, const u32 ldb,
-                      f32 *__restrict c, const u32 ldc) noexcept {
+f64 gemm_8x12(const u32 m, const u32 n, const u32 k,
+              const f32 *__restrict a, const u32 lda,
+              const f32 *__restrict b, const u32 ldb,
+              f32 *__restrict c, const u32 ldc) noexcept {
+
     const f64 start = now();
     
     for (u32 j = 0; j < n; j += NC) {
@@ -122,5 +100,5 @@ f64 gemm_8x12_unroll4(const u32 m, const u32 n, const u32 k,
         kernel(m, jb, k, a, lda, &b[j * ldb], ldb, &c[j * ldc], ldc);
     }
 
-    return now() - start;
+    return now() - start;                
 }

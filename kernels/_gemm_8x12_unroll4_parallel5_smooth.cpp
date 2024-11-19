@@ -4,7 +4,7 @@
 // This code is licensed under the terms of the MIT license
 // (https://opensource.org/license/mit).
 
-#include "gemm_8x12_unroll4.h"
+#include "gemm_8x12_unroll4_parallel5_smooth.h"
 
 static INLINE void ukernel_8x12(const u32 k,
                                 const f32 *__restrict a,
@@ -73,7 +73,6 @@ static INLINE void inner_loop(const u32 m, const u32 n, const u32 k,
             _mm_prefetch(&c[(j + 9) * ldc + i], _MM_HINT_T0);
             _mm_prefetch(&c[(j + 10) * ldc + i], _MM_HINT_T0);
             _mm_prefetch(&c[(j + 11) * ldc + i], _MM_HINT_T0);
-
             const u32 ib = MIN(m - i, 8);
             if (ib == 8 && jb == 12) {
                 ukernel_8x12(k, &a[i * k], &b[j * k], &c[j * ldc + i], ldc);
@@ -103,6 +102,7 @@ static INLINE void kernel(const u32 m, const u32 n, const u32 k,
         pack_B(pb, n, 12, &b[p], ldb, b_tilde);
 
         for (u32 i = 0; i < m; i += MC) {
+
             const u32 ib = MIN(m - i, MC);
 
             pack_A(ib, pb, 8, &a[i * lda + p], lda, a_tilde);
@@ -111,16 +111,35 @@ static INLINE void kernel(const u32 m, const u32 n, const u32 k,
     }
 }
 
-f64 gemm_8x12_unroll4(const u32 m, const u32 n, const u32 k,
-                      const f32 *__restrict a, const u32 lda,
-                      const f32 *__restrict b, const u32 ldb,
-                      f32 *__restrict c, const u32 ldc) noexcept {
+f64 gemm_8x12_unroll4_parallel5_smooth(const u32 m, const u32 n, const u32 k,
+                                       const f32 *__restrict a, const u32 lda,
+                                       const f32 *__restrict b, const u32 ldb,
+                                       f32 *__restrict c, const u32 ldc) noexcept {
     const f64 start = now();
+    // Since NC is usually very large, I have to split it among all the threads
+
+    const u32 max_threads = (u32) omp_get_max_threads();
+
+    const u32 nc_thread = ((NC / max_threads) / 12) * 12;
+
+    // N that will be equally split among threads
+    const u32 n_multiple = ( n / (nc_thread * max_threads)) * nc_thread * max_threads;
     
-    for (u32 j = 0; j < n; j += NC) {
-        const u32 jb = MIN(n - j, NC);
+    const u32 leftovers = n - n_multiple;
+    
+    u32 leftovers_thread = ((leftovers / max_threads) / 12) * 12;
+    if (leftovers_thread == 0)
+        leftovers_thread = 12;
+
+    #pragma omp parallel for if (n_multiple > 0)
+    for (u32 j = 0; j < n_multiple; j += nc_thread)
+        kernel(m, nc_thread, k, a, lda, &b[j * ldb], ldb, &c[j * ldc], ldc);
+
+    #pragma omp parallel for
+    for (u32 j = n_multiple; j < n; j+= leftovers_thread) {
+        const u32 jb = MIN(n - j, leftovers_thread);
         kernel(m, jb, k, a, lda, &b[j * ldb], ldb, &c[j * ldc], ldc);
     }
-
+    
     return now() - start;
 }

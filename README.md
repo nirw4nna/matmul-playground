@@ -78,6 +78,7 @@ Out of these, the two most important ones are probably the first two since they 
 ## Supported Features
 | Extension | Data type | Supported |
 |-----------|-----------|-----------|
-| `AVX`     | FP32      | no        |
 | `AVX2`    | FP32      | yes       |
-| `AVX512`  | FP32      | no        |  
+
+## License
+MIT

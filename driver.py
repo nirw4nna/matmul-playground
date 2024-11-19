@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+# Copyright (c) 2023-2024, Christian Gilli <christian.gilli11@gmail.com>
+# All rights reserved.
+#
+# This code is licensed under the terms of the MIT license
+# (https://opensource.org/license/mit).
+
 import os
 import sys
 
@@ -15,12 +21,8 @@ os.environ['MKL_NUM_THREADS'] = NUM_THREADS
 if IS_PARALLEL:
     # Set OMP policy to not move threads around
     # Note: this appears to harm performance for some reason (probably due MKL/OpenMP interactions).
-    #       Try these without MKL at some point.
-    
-    # os.environ['OMP_PROC_BIND'] = 'close'
-    # os.environ['OMP_PROC_BIND'] = 'true'
-    # os.environ['OMP_PLACES'] = 'cores'
-    pass
+    os.environ['OMP_PROC_BIND'] = 'true'
+    os.environ['OMP_PLACES'] = 'threads'
 else:
     # Set CPU affinity
     os.sched_setaffinity(0, {0})

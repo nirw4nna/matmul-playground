@@ -1,3 +1,9 @@
+// Copyright (c) 2023-2024, Christian Gilli <christian.gilli11@gmail.com>
+// All rights reserved.
+//
+// This code is licensed under the terms of the MIT license
+// (https://opensource.org/license/mit).
+
 #include "gemm_jpi.h"
 
 f64 gemm_jpi(const u32 m, const u32 n, const u32 k,
