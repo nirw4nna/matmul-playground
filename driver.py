@@ -12,7 +12,7 @@ import sys
 NUM_THREADS = os.getenv('NUM_THREADS', '1')
 IS_PARALLEL = int(NUM_THREADS) > 1
 
-MKLROOT = os.getenv('MKLROOT', '/opt/intel/oneapi/mkl/2024.1')
+MKLROOT = os.getenv('MKLROOT', '/opt/intel/oneapi/mkl/2024.2')
 os.environ['MKLROOT'] = MKLROOT
 os.environ['OMP_NUM_THREADS'] = NUM_THREADS
 os.environ['GOTO_NUM_THREADS'] = NUM_THREADS

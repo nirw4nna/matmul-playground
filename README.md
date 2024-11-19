@@ -18,7 +18,7 @@ The code has been tested with the following setup:
 - Linux 5.15 x86_64
 - gcc 11.4.0
 - Python 3.10.12
-- MKL 2024.1 (if you are using a different version you can specify that by setting the environment variable `MKLROOT=/path/to/intel/oneapi/mkl/version` before executing the script)
+- MKL 2024.2 (if you are using a different version you can specify that by setting the environment variable `MKLROOT=/path/to/intel/oneapi/mkl/version` before executing the script)
 
 
 Once all the dependencies are installed:
